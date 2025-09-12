@@ -136,6 +136,29 @@ body{
     </div>
   </section>
 </main>
+<!-- Modals -->
+<!-- Gate (password 1: 2508) -->
+<div id="gateModal" class="modal-overlay" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" tabindex="-1">
+    <div class="modal-card p-6 md:p-7">
+      <h2 class="text-2xl md:text-3xl font-semibold mb-2">Enter password</h2>
+      <p class="text-blue-100/90 mb-3">
+        <span class="mono">You need to create an account using (promo code: M5CS) to obtain a password.</span>
+      </p>
+      <a class="btn inline-flex items-center gap-2 focus-ring mb-4"
+         href="https://refpa49168.com/L?tag=d_3316638m_14189c_&site=3316638&ad=14189&r=registration" target="_blank" rel="noopener">
+        Create an account 
+      </a>
+      <div class="mt-1 flex flex-col sm:flex-row gap-3">
+        <input id="gatePass" inputmode="numeric"
+               class="w-full sm:w-56 bg-gray-900 text-gray-100 border border-white/10 rounded-lg px-4 py-3 mono"
+               placeholder="••••">
+        <button id="gateBtn" class="btn sm:w-40 focus-ring">Confirm</button>
+      </div>
+      <p id="gateErr" class="text-rose-300 text-sm mt-2 hidden">Incorrect password</p>
+    </div>
+  </div>
+</div>
 
 <!-- ID (138XXXXXXX, ровно 10 цифр) -->
 <div id="idModal" class="modal-overlay" aria-hidden="true">
@@ -186,8 +209,9 @@ body{
 <script>
 /* ===================== CONFIG ===================== */
 const CONFIG = {
+  FIRST_PASS: '2508',     // первый пароль
   FUNDS_PASS: '08255',    // второй пароль
-  LIMIT_PER_GAME: 30      // лимит сигналов/коэф. на игру
+  LIMIT_PER_GAME: 30       // лимит сигналов/коэф. на игру
 };
 
 /* ===================== Storage / State ===================== */
@@ -198,6 +222,7 @@ const load = () => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}
 const save = (obj) => localStorage.setItem(LS_KEY, JSON.stringify(obj));
 
 let State = Object.assign({
+  firstUnlocked: false,
   hasId: false,
   idValue: null,
   fundsUnlocked: false,
@@ -227,7 +252,13 @@ function updateChips(){
   document.getElementById('chip-chicken').textContent  = `${State.used.chicken}/${CONFIG.LIMIT_PER_GAME}`;
 }
 
-/* ===================== Gating helpers ===================== */
+/* ===================== Gating ===================== */
+const elGate   = {
+  modal: document.getElementById('gateModal'),
+  pass:  document.getElementById('gatePass'),
+  btn:   document.getElementById('gateBtn'),
+  err:   document.getElementById('gateErr'),
+};
 const elId     = {
   modal: document.getElementById('idModal'),
   input: document.getElementById('idInput'),
@@ -242,8 +273,10 @@ const elFunds  = {
 };
 
 function ensureUnlocked(beforeOpenGameCallback){
+  if(!State.firstUnlocked){ open(elGate.modal); return false; }
   if(!State.hasId){ open(elId.modal); return false; }
   if(!State.fundsUnlocked){
+    // покажем окно средств, а после успешного ввода — вернёмся к открытию игры
     open(elFunds.modal);
     if (typeof beforeOpenGameCallback === 'function') {
       elFunds.btn._afterUnlock = beforeOpenGameCallback; // привяжем разовое действие
@@ -252,6 +285,22 @@ function ensureUnlocked(beforeOpenGameCallback){
   }
   return true;
 }
+
+/* first pass */
+elGate.btn.addEventListener('click', ()=>{
+  const v=(elGate.pass.value||'').trim();
+  if(v===CONFIG.FIRST_PASS){
+    State.firstUnlocked = true;
+    save(State);
+    elGate.err.classList.add('hidden');
+    close(elGate.modal);
+    open(elId.modal);
+    setTimeout(()=>elId.input.focus(), 50);
+  }else{
+    elGate.err.classList.remove('hidden');
+  }
+});
+elGate.pass.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); elGate.btn.click(); }});
 
 /* id (strict: 138 + 7 digits = 10) */
 const ID_RE = /^138\d{7}$/;
@@ -268,6 +317,7 @@ elId.save.addEventListener('click', ()=>{
     save(State);
     elId.err.classList.add('hidden');
     close(elId.modal);
+    // ВАЖНО: fundsModal теперь НЕ открываем здесь!
   }else{
     elId.err.classList.remove('hidden');
   }
@@ -282,6 +332,7 @@ elFunds.btn.addEventListener('click', ()=>{
     elFunds.err.classList.add('hidden');
     close(elFunds.modal);
 
+    // если был запрошен рендер игры — выполняем после разблокировки
     if (typeof elFunds.btn._afterUnlock === 'function') {
       const fn = elFunds.btn._afterUnlock;
       elFunds.btn._afterUnlock = null;
@@ -296,8 +347,9 @@ elFunds.pass.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDe
 /* restore modals on load */
 (function restore(){
   updateChips();
-  if(!State.hasId){ open(elId.modal); return; }
-  // fundsModal открываем при клике на игру
+  if(!State.firstUnlocked){ open(elGate.modal); return; }
+  if(State.firstUnlocked && !State.hasId){ open(elId.modal); return; }
+  // fundsModal НЕ открываем тут — только при клике на игру
 })();
 
 /* ===================== Play Area renderers ===================== */
@@ -480,10 +532,11 @@ function renderChicken(){
   });
 }
 
-/* открытие игры из карточки */
+/* открытие игры из карточки (здесь подхватываем fundsModal при необходимости) */
 document.querySelectorAll('[data-open]').forEach(btn=>{
   btn.addEventListener('click', ()=>{
-    // проверим, есть ли ID; если нет — запросим
+    // если не пройдены первые шаги — покажем соответствующую модалку
+    if(!State.firstUnlocked){ open(elGate.modal); return; }
     if(!State.hasId){ open(elId.modal); return; }
 
     const game = btn.closest('[data-game]').getAttribute('data-game');
@@ -513,6 +566,9 @@ setInterval(()=>{
   const g=['Aviatrix','Mines','Penalty','Chicken'][rndInt(0,3)];
   writeLog(`${ts()} Activity → ${g}`);
 }, rndInt(1100,1700));
+
+/* show first modal if needed on very first load */
+if(!State.firstUnlocked) open(elGate.modal);
 </script>
 </body>
 </html>
